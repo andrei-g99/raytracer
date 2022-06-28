@@ -1,2 +1,4 @@
 ﻿  raytracer.cpp
+C:\Users\bitma\source\repos\RayTracer\RayTracer\raytracer.cpp(110,17): warning C4018: '<': signed/unsigned mismatch
+C:\Users\bitma\source\repos\RayTracer\RayTracer\raytracer.cpp(111,18): warning C4018: '<': signed/unsigned mismatch
   RayTracer.vcxproj -> C:\Users\bitma\source\repos\RayTracer\Debug\RayTracer.exe

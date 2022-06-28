@@ -17,6 +17,7 @@
 using Math::vec3;
 using Math::mat3;
 using Math::norm;
+using sf::Color;
 using Math::are_doubles_equal;
 using Math::dot;
 using Math::normalize;
@@ -64,7 +65,89 @@ std::pair<std::shared_ptr<sphere>, double>  hit(ray& r,object_list& list)
 	return { nullptr ,-1};
 }
 
-sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigned int height,sf::Color bck)
+
+Color shader(const sf::Color& initial_color, const vec3& p, const sphere& sf, const std::vector<std::shared_ptr<light>>& ls, const camera& cam)
+{
+	vec3 normal = normalize(p - sf.center());
+	vec3 first_to_source = normalize(ls.front()->center() - p);
+	//vec3 first_to_cam = normalize((cam.center() - t_in.first()));
+	double product = dot(normal, first_to_source);
+	//double product_with_camera = math::dot(normal, first_to_cam);
+	//if (!(product_with_camera >= 0)) product = -product_with_camera;
+	double intensity = ls.front()->intensity();
+	//std::cout <<product<< std::endl;/////
+
+	if (product > 0)
+	{
+		auto subtract = (sf::Uint8)((1 / intensity) * (255 * (1 - product)));
+		sf::Uint8 R = initial_color.r - subtract;
+		if (subtract >= initial_color.r) R = 0;
+
+		sf::Uint8 G = initial_color.g - subtract;
+		if (subtract >= initial_color.g) G = 0;
+
+		sf::Uint8 B = initial_color.b - subtract;
+		if (subtract >= initial_color.b) B = 0;
+
+		sf::Color newc = { R,G,B };
+		//std::cout << (int)G << std::endl;//
+		return newc;
+	}
+	else
+	{
+		return sf::Color::Black;
+	}
+
+
+}
+
+
+ Color anti_aliasing(double pixel_l, object_list& list, const camera& cam,const vec3& pixmid,const unsigned int N,const sf::Color& bck,bool shader_on = true){
+	 std::vector<Color> colors;
+	 double subpixel = pixel_l / N;
+	 vec3 left_corner = pixmid + vec3{ 0,pixel_l / 2 - subpixel/2,0 } + vec3{ subpixel/2 - pixel_l / 2 ,0,0 };
+
+	for(int i = 0;i<N;i++)
+		for(int j = 0;j<N;j++)
+		{
+			//construct ray
+			vec3 deflected = left_corner + vec3{ i * subpixel,-((int)j) * subpixel,0 };
+			auto r = ray(cam.center(), deflected);
+			auto ptr = hit(r, list);
+			if (ptr.first != nullptr)
+			{
+				if (ptr.second > 0)
+				{
+					auto shaded_color = ptr.first->color();
+					if (shader_on)
+						shaded_color = shader(ptr.first->color(), ptr.second * r.dir() + r.center(), *ptr.first, list.lights(), cam);
+
+					colors.push_back(shaded_color);
+				}else
+				{
+					colors.push_back(bck);
+				}
+
+			}else
+			{
+				colors.push_back(bck);
+			}
+		}
+	unsigned int Rsum = 0;
+	unsigned int Gsum = 0;
+	unsigned int Bsum = 0;
+	for(const auto& i : colors)
+	{
+		Rsum += (unsigned int)i.r;
+		Gsum += (unsigned int)i.g;
+		Bsum += (unsigned int)i.b;
+	}
+
+	return {(sf::Uint8)(Rsum/colors.size()),(sf::Uint8)(Gsum / colors.size()),(sf::Uint8)(Bsum / colors.size()) };
+
+ }
+ 
+sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigned int height,const sf::Color& bck, const unsigned int N,bool shader_on = true,bool anti_aliasing_on = true)
 {
 	double w = 1;
 	double h = (double)height / (double)width;
@@ -78,6 +161,7 @@ sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigne
 	mat3 rot_ym{ {cos(ty),0,-sin(ty)} ,{0,1,0} ,{sin(ty),0,cos(ty)} };
 	mat3 rot_zm{ {cos(tz),sin(tz),0} ,{-sin(tz),cos(tz),0} ,{0,0,1} };
 	mat3 total = rot_zm * rot_ym * rot_xm;
+
 	for (auto& i : list.list())
 	{
 		i->set_center(total * i->center());
@@ -92,14 +176,32 @@ sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigne
 	for(unsigned int i = 0;i<width;i++)
 		for(unsigned int j = 0;j<height;j++)
 		{
-			//construct ray
-			auto r = ray(cam.center(),left_corner + vec3{i*pixel_l,-((int)j)*pixel_l,0});
-			auto ptr = hit(r, list);
-			if (ptr.first != nullptr)
+			if(!anti_aliasing_on)
 			{
-				output.setPixel(i, height-j-1, ptr.first->color());
+				//construct ray
+				auto r = ray(cam.center(), left_corner + vec3{ i * pixel_l,-((int)j) * pixel_l,0 });
+				auto ptr = hit(r, list);
+				if (ptr.first != nullptr)
+				{
+					if (ptr.second > 0)
+					{
+						auto shaded_color = ptr.first->color();
+						if (shader_on)
+							shaded_color = shader(ptr.first->color(), ptr.second * r.dir() + r.center(), *ptr.first, list.lights(), cam);
+
+						output.setPixel(i, j, shaded_color);
+					}
+
+				}
+				r.~ray();
+			}else
+			{
+				//WITH ANTI-ALIASING
+				auto pixel_middle = left_corner + vec3{ i * pixel_l,-((int)j) * pixel_l,0 };
+				output.setPixel(i, j, anti_aliasing(pixel_l, list, cam, pixel_middle, N, bck, true));
+
 			}
-			r.~ray();
+
 		}
 
 	return output;
@@ -107,21 +209,39 @@ sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigne
 
 int main()
 {
-	const int width = 600;
-	const int height = 400;
+	const int width = 1920;
+	const int height = 1080;
+	const unsigned int N = 4;
 	double w = 1;
 	double h = (double)height / (double)width;
-	//const sf::Color background_color = sf::Color(135,206,235); //sky blue
-	const sf::Color background_color = sf::Color(118, 146, 151);
+	const sf::Color background_color = sf::Color(135,206,235); //sky blue
+
 	vec3 camera_center = { 0,0,0 };
 	vec3 camera_angle = { 0,0,0 };
 	camera cam = camera(camera_center, camera_angle, {0,0,1}, w, h);
 	object_list list = object_list();
-	list.push_new_sphere(vec3{ 0,0,-7 }, 1);
+	list.push_new_sphere(vec3{ -1,0,7 }, 1);
+	list.push_new_sphere(vec3{ 0,2 ,9 }, 2, sf::Color::Blue);
+	list.push_new_sphere(vec3{ -1.5,-1 ,6 }, 0.6, sf::Color::Yellow);
+	list.push_new_sphere(vec3{ 0,-1.6-50 ,6 }, 50, sf::Color::Green);
+	light source = light({0,70,-100},1);
+	list.push_light(source);
 
-	sf::Image img = render(list,cam,width,height,background_color);
+	//RENDER
+	auto t0 = utility::TimerStart();///
 
-	std::string path = "C:\\Users\\bitma\\Desktop\\renders\\raytracer.png";
+	sf::Image img = render(list,cam,width,height,background_color,N,true,false);
+
+	utility::TimerRead(t0);///
+	std::string path = "C:\\Users\\bitma\\Desktop\\renders\\raytracer\\no_antialiasing.png";
+	img.saveToFile(path);
+
+	t0 = utility::TimerStart();///
+
+	img = render(list, cam, width, height, background_color, N, true, true);
+
+	utility::TimerRead(t0);///
+	path = "C:\\Users\\bitma\\Desktop\\renders\\raytracer\\with_antialiasing.png";
 	img.saveToFile(path);
 
 }
