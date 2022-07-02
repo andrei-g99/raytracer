@@ -8,7 +8,7 @@ class camera
 private:
 	vec3 m_center;
 	vec3 m_orientation;
-	vec3 m_near;
+	vec3 m_near; // always {0,0,1}
 	double m_width;
 	double m_height;
 

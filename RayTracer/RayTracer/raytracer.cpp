@@ -35,19 +35,25 @@ std::pair<std::shared_ptr<sphere>, double>  hit(ray& r,object_list& list)
 
 	for(const auto& s : list.list())
 	{
-		auto shortest_distance = distance_point_to_line(r, s->center());
-		auto temp = norm(s->center());
-		auto l = sqrt(temp * temp - shortest_distance*shortest_distance);
-		
-		if(shortest_distance <=s->radius())
+		if (s->center()[2] > 1)
 		{
-			//it hit
-			auto half_cord = sqrt(s->radius() * s->radius() - shortest_distance * shortest_distance);
-			auto t = l - half_cord;
-			std::pair<std::shared_ptr<sphere>, double> info = {s,t};
-			hit_spheres.push_back(info);
 
+			auto shortest_distance = distance_point_to_line(r, s->center());
+			auto temp = norm(s->center());
+			auto l = sqrt(temp * temp - shortest_distance * shortest_distance);
+
+			if (shortest_distance <= s->radius())
+			{
+
+				//it hit
+				auto half_cord = sqrt(s->radius() * s->radius() - shortest_distance * shortest_distance);
+				auto t = l - half_cord;
+				std::pair<std::shared_ptr<sphere>, double> info = { s,t };
+				hit_spheres.push_back(info);
+
+			}
 		}
+
 	}
 
 	if(!hit_spheres.empty())
@@ -65,38 +71,63 @@ std::pair<std::shared_ptr<sphere>, double>  hit(ray& r,object_list& list)
 	return { nullptr ,-1};
 }
 
-
-Color shader(const sf::Color& initial_color, const vec3& p, const sphere& sf, const std::vector<std::shared_ptr<light>>& ls, const camera& cam)
+bool any_hit(ray& r,object_list& list,const std::shared_ptr<sphere>& exception = nullptr)
 {
-	vec3 normal = normalize(p - sf.center());
-	vec3 first_to_source = normalize(ls.front()->center() - p);
-	//vec3 first_to_cam = normalize((cam.center() - t_in.first()));
-	double product = dot(normal, first_to_source);
-	//double product_with_camera = math::dot(normal, first_to_cam);
-	//if (!(product_with_camera >= 0)) product = -product_with_camera;
-	double intensity = ls.front()->intensity();
-	//std::cout <<product<< std::endl;/////
+	//detects only hits in front of the ray (t > 0)
+	std::vector<std::pair<std::shared_ptr<sphere>, double>> hit_spheres;
+	auto spheres = list.list();
 
-	if (product > 0)
+	for (const auto& s : spheres)
 	{
-		auto subtract = (sf::Uint8)((1 / intensity) * (255 * (1 - product)));
-		sf::Uint8 R = initial_color.r - subtract;
-		if (subtract >= initial_color.r) R = 0;
+		if(s != exception)
+		{
+				auto shortest_distance = distance_point_to_line(r, s->center());
+				if (shortest_distance <= s->radius())
+				{
+					if(Math::dot(r.dir(),s->center()-r.center()) > 0)
+					return true;
 
-		sf::Uint8 G = initial_color.g - subtract;
-		if (subtract >= initial_color.g) G = 0;
+				}
+		}
 
-		sf::Uint8 B = initial_color.b - subtract;
-		if (subtract >= initial_color.b) B = 0;
-
-		sf::Color newc = { R,G,B };
-		//std::cout << (int)G << std::endl;//
-		return newc;
 	}
-	else
+
+	return false;
+
+}
+
+Color shader(const sf::Color& initial_color, const vec3& p, const std::shared_ptr<sphere>& sf,object_list& scene, const camera& cam)
+{
+	vec3 normal = normalize(p - sf->center());
+	double total_light = 0.2;
+
+	for(const auto& i : scene.lights())
 	{
-		return sf::Color::Black;
+		vec3 first_to_source = normalize(i->center() - p);
+		ray occlusion_ray = ray(p,i->center());
+		if(!any_hit(occlusion_ray,scene,sf))
+		{
+			double product = dot(normal, first_to_source);
+			double intensity = i->intensity();
+			if (product > 0)
+				total_light += intensity * product;
+		}
+
 	}
+
+			//auto subtract = (sf::Uint8)((1 / intensity) * (255 * (1 - product)));
+			sf::Uint8 R = (sf::Uint8)(total_light * (double)initial_color.r);
+			if (total_light * (double)initial_color.r > 255) R = 255;
+
+			sf::Uint8 G = (sf::Uint8)(total_light * (double)initial_color.g);
+			if (total_light * (double)initial_color.g > 255) G = 255;
+
+			sf::Uint8 B = (sf::Uint8)(total_light * (double)initial_color.b);
+			if (total_light * (double)initial_color.b > 255) B = 255;
+
+			sf::Color newc = { R,G,B };
+			return newc;
+
 
 
 }
@@ -116,17 +147,13 @@ Color shader(const sf::Color& initial_color, const vec3& p, const sphere& sf, co
 			auto ptr = hit(r, list);
 			if (ptr.first != nullptr)
 			{
-				if (ptr.second > 0)
-				{
+
 					auto shaded_color = ptr.first->color();
 					if (shader_on)
-						shaded_color = shader(ptr.first->color(), ptr.second * r.dir() + r.center(), *ptr.first, list.lights(), cam);
+						shaded_color = shader(ptr.first->color(), ptr.second * r.dir() + r.center(), ptr.first, list, cam);
 
 					colors.push_back(shaded_color);
-				}else
-				{
-					colors.push_back(bck);
-				}
+			
 
 			}else
 			{
@@ -149,6 +176,8 @@ Color shader(const sf::Color& initial_color, const vec3& p, const sphere& sf, co
  
 sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigned int height,const sf::Color& bck, const unsigned int N,bool shader_on = true,bool anti_aliasing_on = true)
 {
+	auto t0 = utility::TimerStart();///
+
 	double w = 1;
 	double h = (double)height / (double)width;
 	double pixel_l = w / (double)width;
@@ -183,14 +212,13 @@ sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigne
 				auto ptr = hit(r, list);
 				if (ptr.first != nullptr)
 				{
-					if (ptr.second > 0)
-					{
+					
 						auto shaded_color = ptr.first->color();
 						if (shader_on)
-							shaded_color = shader(ptr.first->color(), ptr.second * r.dir() + r.center(), *ptr.first, list.lights(), cam);
+							shaded_color = shader(ptr.first->color(), ptr.second * r.dir() + r.center(), ptr.first, list, cam);
 
 						output.setPixel(i, j, shaded_color);
-					}
+					
 
 				}
 				r.~ray();
@@ -209,39 +237,32 @@ sf::Image render(object_list& list, const camera& cam,unsigned int width,unsigne
 
 int main()
 {
-	const int width = 1920;
-	const int height = 1080;
+	
+	const int width = 800;
+	const int height = 600;
 	const unsigned int N = 4;
 	double w = 1;
 	double h = (double)height / (double)width;
 	const sf::Color background_color = sf::Color(135,206,235); //sky blue
 
-	vec3 camera_center = { 0,0,0 };
-	vec3 camera_angle = { 0,0,0 };
+	vec3 camera_center = { -3,0,0 };
+	vec3 camera_angle = { 0,0.3,0 };
 	camera cam = camera(camera_center, camera_angle, {0,0,1}, w, h);
 	object_list list = object_list();
-	list.push_new_sphere(vec3{ -1,0,7 }, 1);
-	list.push_new_sphere(vec3{ 0,2 ,9 }, 2, sf::Color::Blue);
-	list.push_new_sphere(vec3{ -1.5,-1 ,6 }, 0.6, sf::Color::Yellow);
-	list.push_new_sphere(vec3{ 0,-1.6-50 ,6 }, 50, sf::Color::Green);
-	light source = light({0,70,-100},1);
+	list.push_new_sphere(vec3{ 0,0,5 }, 1);
+	list.push_new_sphere(vec3{ -2,0,5 }, 0.25,sf::Color::Green);
+	light source = light({-30,-10,5},2);
 	list.push_light(source);
+	
 
 	//RENDER
 	auto t0 = utility::TimerStart();///
 
-	sf::Image img = render(list,cam,width,height,background_color,N,true,false);
+	sf::Image img = render(list,cam,width,height,background_color,N,true,true);
 
 	utility::TimerRead(t0);///
-	std::string path = "C:\\Users\\bitma\\Desktop\\renders\\raytracer\\no_antialiasing.png";
+	std::string path = "C:\\Users\\bitma\\Desktop\\renders\\raytracer\\two_sources.png";
 	img.saveToFile(path);
-
-	t0 = utility::TimerStart();///
-
-	img = render(list, cam, width, height, background_color, N, true, true);
-
-	utility::TimerRead(t0);///
-	path = "C:\\Users\\bitma\\Desktop\\renders\\raytracer\\with_antialiasing.png";
-	img.saveToFile(path);
+	
 
 }

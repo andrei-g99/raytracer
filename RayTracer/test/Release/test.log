@@ -1,0 +1,6 @@
+﻿  test.cpp
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 34 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  test.vcxproj -> C:\Users\bitma\source\repos\RayTracer\Release\test.exe

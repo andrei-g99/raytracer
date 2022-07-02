@@ -23,23 +23,14 @@ public:
 	light(const vec3& center, const double intensity)
 	{
 
-		if ((intensity <= 1) && (intensity >= 0))
+		if(intensity > 0)
 		{
 			m_intensity = intensity;
-		}
-		else if (intensity > 1)
-		{
-			m_intensity = 1;
-		}
-		else if (intensity < 0)
+		}else
 		{
 			m_intensity = 0;
+			m_is_on = false;
 		}
-		else
-		{
-			m_intensity = 1;
-		}
-
 		m_center = center;
 		m_is_on = true;
 	}
